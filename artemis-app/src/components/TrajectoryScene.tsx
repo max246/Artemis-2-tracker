@@ -472,13 +472,17 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
     return () => cancelAnimationFrame(animRef.current);
   }, [draw]);
 
-  // Mouse/touch interaction (only for free mode, but still allow in follow for later)
+  // Mouse + touch interaction with pinch-to-zoom
+  const pinchRef = useRef<{ active: boolean; startDist: number; startZoom: number }>({
+    active: false, startDist: 0, startZoom: 1,
+  });
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const onPointerDown = (e: PointerEvent) => {
-      canvas.setPointerCapture(e.pointerId);
+    // --- Mouse handlers ---
+    const onMouseDown = (e: MouseEvent) => {
       dragRef.current = {
         active: true,
         startX: e.clientX,
@@ -491,7 +495,7 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
       };
     };
 
-    const onPointerMove = (e: PointerEvent) => {
+    const onMouseMove = (e: MouseEvent) => {
       if (!dragRef.current.active) return;
       const dx = e.clientX - dragRef.current.startX;
       const dy = e.clientY - dragRef.current.startY;
@@ -503,21 +507,17 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
         };
         return;
       }
-
       if (viewMode !== "free") return;
       if (dragRef.current.button === 2) {
         camRef.current.panX = dragRef.current.startPanX + dx;
         camRef.current.panY = dragRef.current.startPanY + dy;
       } else {
         camRef.current.rotY = dragRef.current.startRotY + dx * 0.005;
-        camRef.current.rotX = Math.max(
-          -Math.PI / 2,
-          Math.min(Math.PI / 2, dragRef.current.startRotX + dy * 0.005)
-        );
+        camRef.current.rotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, dragRef.current.startRotX + dy * 0.005));
       }
     };
 
-    const onPointerUp = () => { dragRef.current.active = false; };
+    const onMouseUp = () => { dragRef.current.active = false; };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -528,21 +528,94 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
       }
     };
 
+    // --- Touch handlers (single-finger drag + two-finger pinch zoom) ---
+    function touchDist(t1: Touch, t2: Touch): number {
+      return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+    }
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        // Start pinch
+        e.preventDefault();
+        pinchRef.current = {
+          active: true,
+          startDist: touchDist(e.touches[0], e.touches[1]),
+          startZoom: viewMode === "follow" ? followZoomRef.current : camRef.current.zoom,
+        };
+        dragRef.current.active = false;
+      } else if (e.touches.length === 1) {
+        // Single finger drag
+        const t = e.touches[0];
+        dragRef.current = {
+          active: true,
+          startX: t.clientX,
+          startY: t.clientY,
+          startRotX: viewMode === "pov" ? povLookRef.current.pitch : camRef.current.rotX,
+          startRotY: viewMode === "pov" ? povLookRef.current.yaw : camRef.current.rotY,
+          startPanX: camRef.current.panX,
+          startPanY: camRef.current.panY,
+          button: 0,
+        };
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchRef.current.active) {
+        e.preventDefault();
+        const dist = touchDist(e.touches[0], e.touches[1]);
+        const scale = dist / pinchRef.current.startDist;
+        if (viewMode === "free") {
+          camRef.current.zoom = Math.max(0.2, Math.min(5, pinchRef.current.startZoom * scale));
+        } else if (viewMode === "follow") {
+          followZoomRef.current = Math.max(0.2, Math.min(5, pinchRef.current.startZoom / scale));
+        }
+        return;
+      }
+
+      if (!dragRef.current.active || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - dragRef.current.startX;
+      const dy = t.clientY - dragRef.current.startY;
+
+      if (viewMode === "pov") {
+        povLookRef.current = {
+          yaw: dragRef.current.startRotY + dx * 0.004,
+          pitch: Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, dragRef.current.startRotX + dy * 0.004)),
+        };
+      } else if (viewMode === "free") {
+        camRef.current.rotY = dragRef.current.startRotY + dx * 0.005;
+        camRef.current.rotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, dragRef.current.startRotX + dy * 0.005));
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinchRef.current.active = false;
+      if (e.touches.length === 0) dragRef.current.active = false;
+    };
+
     const onContext = (e: Event) => e.preventDefault();
 
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("pointercancel", onPointerUp);
+    canvas.addEventListener("mousedown", onMouseDown);
+    canvas.addEventListener("mousemove", onMouseMove);
+    canvas.addEventListener("mouseup", onMouseUp);
+    canvas.addEventListener("mouseleave", onMouseUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd);
+    canvas.addEventListener("touchcancel", onTouchEnd);
     canvas.addEventListener("contextmenu", onContext);
 
     return () => {
-      canvas.removeEventListener("pointerdown", onPointerDown);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerup", onPointerUp);
-      canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("mousedown", onMouseDown);
+      canvas.removeEventListener("mousemove", onMouseMove);
+      canvas.removeEventListener("mouseup", onMouseUp);
+      canvas.removeEventListener("mouseleave", onMouseUp);
       canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("touchcancel", onTouchEnd);
       canvas.removeEventListener("contextmenu", onContext);
     };
   }, [viewMode]);
