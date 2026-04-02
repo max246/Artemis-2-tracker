@@ -371,6 +371,26 @@ body,
   min-width: 140px;
   text-align: center;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-badge {
+  display: inline-block;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 6px;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .controls__views {

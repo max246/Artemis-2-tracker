@@ -141,20 +141,37 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
     const cam = camRef.current;
     const art = data.artemis;
     const moon = data.moon;
-    const ai = Math.min(currentIdx, art.length - 1);
-    const mi = Math.min(currentIdx, moon.length - 1);
+    const maxI = art.length - 1;
+
+    // Interpolate position from fractional index
+    const fIdx = Math.max(0, Math.min(currentIdx, maxI));
+    const ai = Math.floor(fIdx);
+    const aj = Math.min(ai + 1, maxI);
+    const t = fIdx - ai;
+
+    const lerpV = (a: number, b: number) => a + (b - a) * t;
+    const orionInterp = {
+      x: lerpV(art[ai].x, art[aj].x),
+      y: lerpV(art[ai].y, art[aj].y),
+      z: lerpV(art[ai].z, art[aj].z),
+    };
+    const moonInterp = {
+      x: lerpV(moon[ai].x, moon[aj].x),
+      y: lerpV(moon[ai].y, moon[aj].y),
+      z: lerpV(moon[ai].z, moon[aj].z),
+    };
 
     // Compute follow/pov camera if needed
-    const orionW = [art[ai].x * S, art[ai].y * S, art[ai].z * S];
+    const orionW = [orionInterp.x * S, orionInterp.y * S, orionInterp.z * S];
 
-    // Velocity direction (forward for POV)
+    // Velocity direction (forward for POV) — use surrounding data points
+    const vi0 = Math.max(0, ai);
+    const vi1 = Math.min(vi0 + 1, maxI);
     let velocity: number[];
-    if (ai < art.length - 1) {
-      const next = art[ai + 1];
-      velocity = vec3norm(vec3sub([next.x * S, next.y * S, next.z * S], orionW));
-    } else if (ai > 0) {
-      const prev = art[ai - 1];
-      velocity = vec3norm(vec3sub(orionW, [prev.x * S, prev.y * S, prev.z * S]));
+    if (vi0 !== vi1) {
+      const next = [art[vi1].x * S, art[vi1].y * S, art[vi1].z * S];
+      const prev = [art[vi0].x * S, art[vi0].y * S, art[vi0].z * S];
+      velocity = vec3norm(vec3sub(next, prev));
     } else {
       velocity = [1, 0, 0];
     }
@@ -254,13 +271,14 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
     addDrawable(100, moonPathFn);
 
     // Artemis future trajectory
+    const futureStart = Math.ceil(fIdx);
     const futureFn = () => {
       ctx.strokeStyle = "rgba(96,165,250,0.15)";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
       let started = false;
-      for (let i = currentIdx; i < art.length; i++) {
+      for (let i = futureStart; i < art.length; i++) {
         const pt = p(art[i]);
         if (!pt) { started = false; continue; }
         if (!started) { ctx.moveTo(pt.x, pt.y); started = true; }
@@ -272,18 +290,29 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
     addDrawable(90, futureFn);
 
     // Artemis traveled trajectory
+    const traveledEnd = Math.floor(fIdx);
     const traveledFn = () => {
-      if (currentIdx <= 0) return;
+      if (traveledEnd <= 0) return;
       ctx.lineWidth = 2;
-      for (let i = 1; i <= currentIdx && i < art.length; i++) {
+      for (let i = 1; i <= traveledEnd && i < art.length; i++) {
+        const alpha = 0.15 + 0.85 * (i / traveledEnd);
         const p0 = p(art[i - 1]);
         const p1 = p(art[i]);
         if (!p0 || !p1) continue;
-        const alpha = 0.15 + 0.85 * (i / currentIdx);
         ctx.strokeStyle = `rgba(96,165,250,${alpha})`;
         ctx.beginPath();
         ctx.moveTo(p0.x, p0.y);
         ctx.lineTo(p1.x, p1.y);
+        ctx.stroke();
+      }
+      // Draw segment from last data point to interpolated position
+      const lastPt = p(art[traveledEnd]);
+      const orionPt = proj(orionInterp.x * S, orionInterp.y * S, orionInterp.z * S);
+      if (lastPt && orionPt) {
+        ctx.strokeStyle = "rgba(96,165,250,1)";
+        ctx.beginPath();
+        ctx.moveTo(lastPt.x, lastPt.y);
+        ctx.lineTo(orionPt.x, orionPt.y);
         ctx.stroke();
       }
     };
@@ -291,8 +320,8 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
 
     // Distance lines
     const distLinesFn = () => {
-      const orionPt = p(art[ai]);
-      const moonPt = p(moon[mi]);
+      const orionPt = proj(orionInterp.x * S, orionInterp.y * S, orionInterp.z * S);
+      const moonPt = proj(moonInterp.x * S, moonInterp.y * S, moonInterp.z * S);
       const earthPt = proj(0, 0, 0);
       if (!orionPt) return;
       ctx.setLineDash([3, 5]);
@@ -343,7 +372,7 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
     }
 
     // Moon
-    const moonPt = p(moon[mi]);
+    const moonPt = proj(moonInterp.x * S, moonInterp.y * S, moonInterp.z * S);
     if (moonPt) {
       const moonR = projR(MOON_RADIUS_KM * S, moonPt.depth);
       addDrawable(moonPt.depth, () => {
@@ -371,9 +400,9 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
       if (!mpt) continue;
       addDrawable(mpt.depth, () => {
         ctx.fillStyle =
-          ms.idx < currentIdx - 2
+          ms.idx < ai - 2
             ? "rgba(52,211,153,0.5)"
-            : ms.idx <= currentIdx + 2
+            : ms.idx <= ai + 2
               ? "rgba(96,165,250,0.7)"
               : "rgba(71,85,105,0.5)";
         ctx.beginPath();
@@ -384,7 +413,7 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
 
     // Orion marker (skip in POV since we ARE Orion)
     if (viewMode !== "pov") {
-      const orionPt = p(art[ai]);
+      const orionPt = proj(orionInterp.x * S, orionInterp.y * S, orionInterp.z * S);
       if (orionPt) {
         addDrawable(orionPt.depth - 0.001, () => {
           const pulse = (Date.now() % 2000) / 2000;
@@ -405,7 +434,7 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
           ctx.fillText('Orion "Integrity"', orionPt.x + 12, orionPt.y - 8);
           ctx.fillStyle = "#94a3b8";
           ctx.font = "10px system-ui";
-          ctx.fillText(art[ai].date.replace(".0000", ""), orionPt.x + 12, orionPt.y + 6);
+          ctx.fillText(art[Math.min(Math.round(fIdx), maxI)].date.replace(".0000", ""), orionPt.x + 12, orionPt.y + 6);
         });
       }
     }
@@ -449,8 +478,8 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
       ctx.fillText("ORION FORWARD CAM", m + 6, m + 16);
 
       // Velocity vector
-      const distE = vec3len([art[ai].x, art[ai].y, art[ai].z]);
-      const distM = vec3len(vec3sub([art[ai].x, art[ai].y, art[ai].z], [moon[mi].x, moon[mi].y, moon[mi].z]));
+      const distE = vec3len([orionInterp.x, orionInterp.y, orionInterp.z]);
+      const distM = vec3len(vec3sub([orionInterp.x, orionInterp.y, orionInterp.z], [moonInterp.x, moonInterp.y, moonInterp.z]));
       ctx.fillStyle = "rgba(148,163,184,0.5)";
       ctx.font = "10px system-ui";
       ctx.fillText(`Earth: ${formatDist(distE)}`, m + 6, h - m - 26);
@@ -522,7 +551,7 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (viewMode === "free") {
-        camRef.current.zoom = Math.max(0.2, Math.min(5, camRef.current.zoom * (1 - e.deltaY * 0.001)));
+        camRef.current.zoom = Math.max(0.2, Math.min(20, camRef.current.zoom * (1 - e.deltaY * 0.001)));
       } else if (viewMode === "follow") {
         followZoomRef.current = Math.max(0.2, Math.min(5, followZoomRef.current * (1 + e.deltaY * 0.001)));
       }
@@ -565,7 +594,7 @@ export default function TrajectoryScene({ data, currentIdx, viewMode }: ScenePro
         const dist = touchDist(e.touches[0], e.touches[1]);
         const scale = dist / pinchRef.current.startDist;
         if (viewMode === "free") {
-          camRef.current.zoom = Math.max(0.2, Math.min(5, pinchRef.current.startZoom * scale));
+          camRef.current.zoom = Math.max(0.2, Math.min(20, pinchRef.current.startZoom * scale));
         } else if (viewMode === "follow") {
           followZoomRef.current = Math.max(0.2, Math.min(5, pinchRef.current.startZoom / scale));
         }

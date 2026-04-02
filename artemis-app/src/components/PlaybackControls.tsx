@@ -6,6 +6,7 @@ interface PlaybackControlsProps {
   playing: boolean;
   currentDate: string;
   viewMode: ViewMode;
+  liveMode: boolean;
   onSliderChange: (idx: number) => void;
   onTogglePlay: () => void;
   onJumpToNow: () => void;
@@ -24,6 +25,7 @@ export default function PlaybackControls({
   playing,
   currentDate,
   viewMode,
+  liveMode,
   onSliderChange,
   onTogglePlay,
   onJumpToNow,
@@ -39,10 +41,13 @@ export default function PlaybackControls({
         className="controls__slider"
         min={0}
         max={maxIdx}
-        value={currentIdx}
+        value={Math.round(currentIdx)}
         onChange={(e) => onSliderChange(parseInt(e.target.value))}
       />
-      <span className="controls__time">{currentDate}</span>
+      <span className="controls__time">
+        {liveMode && <span className="live-badge">LIVE</span>}
+        {currentDate}
+      </span>
       <div className="controls__views">
         {VIEW_LABELS.map(({ mode, label }) => (
           <button
@@ -54,7 +59,7 @@ export default function PlaybackControls({
           </button>
         ))}
       </div>
-      <button className="controls__btn" onClick={onJumpToNow}>
+      <button className={`controls__btn ${liveMode ? "active" : ""}`} onClick={onJumpToNow}>
         Now
       </button>
     </div>

@@ -15,6 +15,7 @@ export default function App() {
     togglePlay,
     jumpToNow,
     stats,
+    liveMode,
   } = useMissionState();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -36,6 +37,7 @@ export default function App() {
           playing={playing}
           currentDate={stats.currentDate}
           viewMode={viewMode}
+          liveMode={liveMode}
           onSliderChange={setCurrentIdx}
           onTogglePlay={togglePlay}
           onJumpToNow={jumpToNow}
