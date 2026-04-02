@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import trajectoryData from "../data/trajectory_data.json";
 import type { TrajectoryData, MissionStats } from "../types";
 import { LAUNCH_UTC } from "../data/milestones";
@@ -23,19 +23,45 @@ function parseDate(dateStr: string): Date {
   );
 }
 
-function getPhase(metHours: number): string {
-  if (metHours < 1) return "Earth Orbit";
-  if (metHours < 13) return "Orbit Raising";
-  if (metHours < 26) return "Pre-TLI Coast";
-  if (metHours < 27) return "Translunar Injection";
-  if (metHours < 100) return "Translunar Coast";
-  if (metHours < 130) return "Lunar Flyby";
-  if (metHours < 210) return "Trans-Earth Coast";
+// Phases based on actual trajectory data:
+//   idx 0-5:    Earth orbit maneuvers (launch to ICPS separation)
+//   idx 5-20:   Coasting to apogee
+//   idx 20-43:  Descending back toward perigee
+//   idx 43-45:  Perigee & TLI burn
+//   idx 45-220: Translunar coast
+//   idx 220-250: Lunar flyby
+//   idx 250-410: Trans-Earth coast
+//   idx 410+:   Earth return & reentry
+function getPhase(idx: number): string {
+  if (idx <= 5) return "Earth Orbit";
+  if (idx <= 20) return "Coast to Apogee";
+  if (idx <= 43) return "Descent to Perigee";
+  if (idx <= 46) return "Translunar Injection";
+  if (idx <= 220) return "Translunar Coast";
+  if (idx <= 250) return "Lunar Flyby";
+  if (idx <= 410) return "Trans-Earth Coast";
   return "Earth Return";
 }
 
+/** Find the trajectory index closest to the current real time */
+function computeNowIdx(): number {
+  const now = Date.now();
+  let best = 0;
+  let bestDiff = Infinity;
+  for (let i = 0; i < data.artemis.length; i++) {
+    const t = parseDate(data.artemis[i].date).getTime();
+    const diff = Math.abs(t - now);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = i;
+    }
+  }
+  return best;
+}
+
 export function useMissionState() {
-  const [currentIdx, setCurrentIdx] = useState(20);
+  const nowIdx = useMemo(() => computeNowIdx(), []);
+  const [currentIdx, setCurrentIdx] = useState(nowIdx);
   const [playing, setPlaying] = useState(false);
   const intervalRef = useRef<number | null>(null);
 
@@ -46,7 +72,7 @@ export function useMissionState() {
   }, []);
 
   const jumpToNow = useCallback(() => {
-    setCurrentIdx(20);
+    setCurrentIdx(computeNowIdx());
   }, []);
 
   useEffect(() => {
@@ -86,7 +112,7 @@ export function useMissionState() {
   const metH = Math.floor(metMs / 3600000);
   const metM = Math.floor((metMs % 3600000) / 60000);
   const met = `T+${metH}h ${metM}m`;
-  const phase = getPhase(metH);
+  const phase = getPhase(ai);
 
   const stats: MissionStats = {
     distEarth,
