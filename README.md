@@ -59,6 +59,18 @@ cd artemis-app
 npx vercel
 ```
 
+## Trajectory Data Updates
+
+Trajectory data is fetched from JPL Horizons at **build time** via a prebuild script. Every `npm run build` pulls the latest ephemeris data automatically.
+
+To fetch fresh data manually:
+
+```bash
+npm run fetch-data
+```
+
+To keep a deployed site up to date, set up a periodic rebuild on your hosting platform (e.g. a Vercel Deploy Hook triggered by a cron job).
+
 ## Data Sources
 
 - Trajectory data: [JPL Horizons System](https://ssd.jpl.nasa.gov/horizons/) (NASA/JPL), spacecraft ID `-1024`
